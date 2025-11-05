@@ -1,0 +1,8 @@
+{
+  "name": "Sinum",
+  "content_in_root": false,
+  "filename": "sinum",
+  "domains": ["sinum"],
+  "iot_class": "Local Polling"
+}
+

@@ -1,0 +1,14 @@
+{
+  "domain": "sinum",
+  "name": "Sinum",
+  "codeowners": ["@pinguin"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/pinguin/sinum",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/pinguin/sinum/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
+
