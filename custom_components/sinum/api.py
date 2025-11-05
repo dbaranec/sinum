@@ -25,7 +25,12 @@ class SinumAPI:
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
         if self._session is None:
-            self._session = aiohttp.ClientSession()
+            # Create SSL context that allows self-signed certificates
+            # This is needed for local Sinum installations
+            ssl_context = False  # Will disable SSL verification for local dev
+            # For production, you might want to use: ssl_context = ssl.create_default_context()
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
     async def async_authenticate(self) -> None:

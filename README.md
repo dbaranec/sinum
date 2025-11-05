@@ -42,7 +42,15 @@ HACS automaticky stiahne a nainštaluje integráciu z GitHub repository.
 2. Kliknite na **Pridať integráciu**
 3. Vyhľadajte **Sinum**
 4. Zadajte:
-   - **Host**: IP adresa alebo hostname vášho Sinum systému (napr. `http://192.168.1.100:8080` alebo `http://sinum.local:8080`)
+   - **Host**: Úplná URL adresa vášho Sinum systému
+     - Príklady:
+       - `https://sinum.local` (ak používate HTTPS na štandardnom porte 443) - **Odporúčané**
+       - `https://sinum.local:443` (ekvivalent vyššie uvedeného)
+       - `https://192.168.50.231` (ak používate IP adresu s HTTPS)
+       - `http://sinum.local:8080` (iba ak API beží na HTTP porte 8080)
+     - **Dôležité**: 
+       - Ak port 443 funguje (HTTPS), použite `https://sinum.local` (port 443 je štandardný a nemusí byť v URL)
+       - Port musí byť súčasťou URL len ak API nebeží na štandardnom porte (80 pre HTTP, 443 pre HTTPS)
    - **Username**: Používateľské meno
    - **Password**: Heslo
 5. Kliknite na **Odoslať**
@@ -123,30 +131,37 @@ Ak dostávate chybu "invalid_auth" aj keď sú údaje správne:
    - Hľadajte správy obsahujúce "sinum" alebo "SinumAPI"
 
 3. **Overte API endpoint**:
-   - Skontrolujte, či API je dostupné na `http://192.168.50.231:8080/api/v1/login`
+   - Skontrolujte, či API je dostupné na vašej URL (napr. `https://sinum.local/api/v1/login`)
    - Môžete skúsiť otvoriť v prehliadači alebo pomocou curl:
      ```bash
-     curl -X POST http://192.168.50.231:8080/api/v1/login \
+     # Ak používate HTTPS (odporúčané):
+     curl -X POST https://sinum.local/api/v1/login \
+       -H "Content-Type: application/json" \
+       -d '{"username":"Dominik","password":"your_password"}'
+     
+     # Alebo ak používate IP adresu:
+     curl -X POST https://192.168.50.231/api/v1/login \
+       -H "Content-Type: application/json" \
+       -d '{"username":"Dominik","password":"your_password"}'
+     
+     # Poznámka: Ak máte SSL certifikát problémy, môžete skúsiť:
+     curl -k -X POST https://sinum.local/api/v1/login \
        -H "Content-Type: application/json" \
        -d '{"username":"Dominik","password":"your_password"}'
      ```
    
-   **Poznámka**: Ak používate `sinum.local` namiesto IP adresy:
-     ```bash
-     curl -X POST http://sinum.local/api/v1/login \
-       -H "Content-Type: application/json" \
-       -d '{"username":"Dominik","password":"your_password"}'
-     ```
+   **Poznámka**: Port 443 je štandardný HTTPS port a nemusí byť v URL (`https://sinum.local` je ekvivalentné `https://sinum.local:443`)
 
 4. **Možné príčiny**:
-   - Nesprávny endpoint (možno `/api/auth/login` namiesto `/auth/login`)
+   - Nesprávny protokol (HTTP vs HTTPS) - skontrolujte pomocou `nc -zv IP_ADRESA PORT`
+   - Nesprávny port v URL (ak API beží na porte 8080, musí byť v URL: `http://sinum.local:8080`)
+   - SSL certifikát problémy (ak používate HTTPS, možno bude potrebné ignorovať certifikát)
    - API očakáva iný formát dát
-   - Port alebo IP adresa nie sú správne
+   - IP adresa alebo hostname nie sú správne
    - Firewall blokuje prístup
 
 5. **Skontrolujte dokumentáciu API**:
-   - Overte presný endpoint a formát požiadavky
-   - Možno je potrebné upraviť `api.py` podľa skutočného API
+   - Overte presný endpoint a formát požiadavky na [apidocs.sinum.tech](https://apidocs.sinum.tech)
 
 ### Ďalšie problémy
 
