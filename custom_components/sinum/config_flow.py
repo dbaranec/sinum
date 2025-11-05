@@ -14,12 +14,13 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .api import SinumAPI
 from .const import DOMAIN
+from .exceptions import CannotConnect, InvalidAuth
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_HOST, default="http://192.168.1.100:8080"): str,
+        vol.Required(CONF_HOST, default="http://192.168.50.231:8080"): str,
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
     }
@@ -38,8 +39,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         await api.async_test_connection()
     except CannotConnect:
         raise
+    except InvalidAuth:
+        raise
     except Exception as err:
-        raise InvalidAuth from err
+        _LOGGER.exception("Unexpected error during validation")
+        raise InvalidAuth(f"Unexpected error: {err}") from err
     
     return {"title": f"Sinum ({data[CONF_HOST]})"}
 
@@ -75,12 +79,4 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
-
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(HomeAssistantError):
-    """Error to indicate there is invalid auth."""
 

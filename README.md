@@ -36,98 +36,6 @@ HACS automaticky stiahne a nainštaluje integráciu z GitHub repository.
 
 **Odkaz na dokumentáciu HACS:** [Custom Repositories](https://www.hacs.xyz/docs/faq/custom_repositories/)
 
-### Lokálna inštalácia (pre testovanie bez GitHubu)
-
-Ak chcete testovať integráciu lokálne bez toho, aby ste ju museli najprv nahrať na GitHub:
-
-**Postup:**
-
-1. **Nájdite adresár Home Assistant:**
-   - Pre Home Assistant OS na sieti: `/config/` (prístupné cez SSH alebo Samba)
-   - Pre Docker: `/config/` (zvyčajne mapovaný na `~/homeassistant/`)
-   - Pre venv/venv: `~/.homeassistant/` alebo cestu kde beží HA
-
-2. **Skopírujte integráciu:**
-
-   **A) Cez SSH (ak máte Home Assistant na sieti, napr. 192.168.1.50):**
-   ```bash
-   # Automatický skript (upravte HA_IP v install_local.sh):
-   ./install_local.sh
-   
-   # Alebo manuálne cez SSH:
-   scp -r /Users/dbaranec/Workspace/sinum/custom_components/sinum root@192.168.1.50:/config/custom_components/
-   
-   # Reštartujte HA:
-   ssh root@192.168.1.50 "ha core restart"
-   ```
-   
-   **B) Cez Samba share (ak je povolený):**
-   ```bash
-   # Pripojte sa na Samba share:
-   # Connect to: smb://192.168.1.50/config
-   # Potom skopírujte priečinok sinum do custom_components/
-   ```
-   
-   **C) Lokálne kopírovanie (ak máte mountovaný config adresár):**
-   ```bash
-   cp -r /Users/dbaranec/Workspace/sinum/custom_components/sinum /config/custom_components/
-   ```
-   
-   **D) Symlink pre development (zmeny sa prejavia automaticky po reštarte):**
-   ```bash
-   # Lokálne:
-   ln -s /Users/dbaranec/Workspace/sinum/custom_components/sinum /config/custom_components/sinum
-   
-   # Cez SSH (nepraktické, lepšie kopírovať):
-   # ssh root@192.168.1.50 "ln -s /mnt/sdb1/sinum /config/custom_components/sinum"
-   ```
-
-3. **Skontrolujte štruktúru:**
-   ```
-   /config/
-   ├── configuration.yaml
-   └── custom_components/
-       └── sinum/
-           ├── __init__.py
-           ├── manifest.json
-           ├── config_flow.py
-           └── ...
-   ```
-
-3. **Reštartujte Home Assistant:**
-   - Pre Home Assistant OS na sieti: `ssh root@192.168.1.50 "ha core restart"` alebo cez UI
-   - Pre Docker: `docker restart homeassistant`
-   - Pre venv: Reštartujte službu
-
-4. **Skontrolujte logy:**
-   ```bash
-   # Cez SSH:
-   ssh root@192.168.1.50 "ha core logs | grep sinum"
-   
-   # Alebo cez UI: Developer Tools → Logs
-   # V logoch by ste mali vidieť: "Loading integration: sinum"
-   ```
-
-**Výhody lokálneho testovania:**
-- ✅ Okamžité zmeny bez pushovania na GitHub
-- ✅ Rýchlejší development cyklus
-- ✅ Jednoduchšie debugovanie
-- ✅ Môžete použiť symlink pre automatické aktualizácie
-
-**Symlink vs. kopírovanie:**
-- **Symlink**: Zmeny v projekte sa okamžite prejavia (potrebuje reštart HA)
-- **Kopírovanie**: Musíte kopírovať súbory zakaždým po zmene
-
-**Tipy pre development:**
-- Zapnite debug logy v `configuration.yaml`:
-  ```yaml
-  logger:
-    default: info
-    logs:
-      custom_components.sinum: debug
-  ```
-- Skontrolujte logy: `tail -f /config/home-assistant.log | grep sinum`
-
 ## Konfigurácia
 
 1. Prejdite do **Nastavenia** → **Zariadenia a služby**
@@ -139,35 +47,55 @@ Ak chcete testovať integráciu lokálne bez toho, aby ste ju museli najprv nahr
    - **Password**: Heslo
 5. Kliknite na **Odoslať**
 
-## Konfigurácia API
+## API Implementácia
 
-**Dôležité**: Táto integrácia obsahuje základnú implementáciu API klienta. Je potrebné upraviť súbor `custom_components/sinum/api.py` podľa skutočného API vášho Sinum systému.
+Integrácia je implementovaná podľa oficiálnej Sinum API dokumentácie: [apidocs.sinum.tech](https://apidocs.sinum.tech)
 
-### Čo je potrebné upraviť v `api.py`:
+### API Endpointy:
 
-1. **Autentifikácia** (`async_authenticate`):
-   - URL endpoint pre prihlásenie
-   - Formát požiadavky (JSON, form-data, atď.)
-   - Spôsob získania autentifikačného tokenu
+1. **Autentifikácia**: `POST /api/v1/login`
+   - Odošle `username` a `password` v JSON formáte
+   - Vráti autentifikačný token
 
-2. **Získanie miestností** (`async_get_rooms`):
-   - URL endpoint pre získanie zoznamu miestností
-   - Formát odpovede API
-   - Očakávaný formát dát: `[{"id": 1, "name": "Obývačka", "temperature": 22.5}, ...]`
+2. **Získanie miestností**: `GET /api/v1/rooms` (alebo podobný endpoint)
+   - Vyžaduje Authorization header: `Bearer {token}`
+   - Vráti zoznam miestností s teplotami
 
-### Príklad úpravy pre konkrétne API:
+### Formát dát:
 
-```python
-# Ak máte API endpoint /api/v1/login
-auth_url = f"{self.host}/api/v1/login"
+API očakáva tieto formáty odpovedí:
 
-# Ak váš API používa iný formát autentifikácie
-async with session.post(
-    auth_url,
-    auth=aiohttp.BasicAuth(self.username, self.password),
-    timeout=aiohttp.ClientTimeout(total=10),
-) as response:
-    # ...
+**Autentifikácia:**
+```json
+{
+  "token": "your-auth-token-here"
+}
+```
+
+**Miestnosti:**
+```json
+[
+  {
+    "id": 1,
+    "name": "Obývačka",
+    "temperature": 22.5
+  },
+  {
+    "id": 2,
+    "name": "Kuchyňa",
+    "temperature": 21.0
+  }
+]
+```
+
+Alebo môže byť zabalené v objekte:
+```json
+{
+  "rooms": [
+    {"id": 1, "name": "Obývačka", "temperature": 22.5},
+    {"id": 2, "name": "Kuchyňa", "temperature": 21.0}
+  ]
+}
 ```
 
 ## Senzory
@@ -175,11 +103,57 @@ async with session.post(
 Po úspešnej konfigurácii sa vytvoria teplotné senzory pre každú miestnosť:
 - `sensor.sinum_[nazov_miestnosti]` - teplota v miestnosti
 
-## Podpora
+## Riešenie problémov
+
+### Chyba "invalid_auth"
+
+Ak dostávate chybu "invalid_auth" aj keď sú údaje správne:
+
+1. **Zapnite debug logy** v `configuration.yaml`:
+   ```yaml
+   logger:
+     default: info
+     logs:
+       custom_components.sinum: debug
+   ```
+
+2. **Skontrolujte logy** v Home Assistant:
+   - Prejdite do **Developer Tools** → **Logs**
+   - Alebo Settings → System → Logs
+   - Hľadajte správy obsahujúce "sinum" alebo "SinumAPI"
+
+3. **Overte API endpoint**:
+   - Skontrolujte, či API je dostupné na `http://192.168.50.231:8080/api/v1/login`
+   - Môžete skúsiť otvoriť v prehliadači alebo pomocou curl:
+     ```bash
+     curl -X POST http://192.168.50.231:8080/api/v1/login \
+       -H "Content-Type: application/json" \
+       -d '{"username":"Dominik","password":"your_password"}'
+     ```
+   
+   **Poznámka**: Ak používate `sinum.local` namiesto IP adresy:
+     ```bash
+     curl -X POST http://sinum.local/api/v1/login \
+       -H "Content-Type: application/json" \
+       -d '{"username":"Dominik","password":"your_password"}'
+     ```
+
+4. **Možné príčiny**:
+   - Nesprávny endpoint (možno `/api/auth/login` namiesto `/auth/login`)
+   - API očakáva iný formát dát
+   - Port alebo IP adresa nie sú správne
+   - Firewall blokuje prístup
+
+5. **Skontrolujte dokumentáciu API**:
+   - Overte presný endpoint a formát požiadavky
+   - Možno je potrebné upraviť `api.py` podľa skutočného API
+
+### Ďalšie problémy
 
 Ak narazíte na problémy, skontrolujte:
 1. Logy Home Assistant na chybové hlásenia
 2. Správnosť prihlasovacích údajov
 3. Dostupnosť Sinum API na zadanej adrese
 4. Kompatibilitu API formátu (možno je potrebné upraviť `api.py`)
+5. Sieťové pripojenie medzi Home Assistant a Sinum serverom
 
