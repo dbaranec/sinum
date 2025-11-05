@@ -14,7 +14,7 @@ HACS automaticky stiahne a nainštaluje integráciu z GitHub repository.
 2. Prejdite na "Integrácie"
 3. Kliknite na tri bodky v pravom hornom rohu → "Custom repositories"
 4. Pridajte tento repozitár:
-   - **URL**: `https://github.com/pinguin/sinum` (alebo URL vášho repository)
+   - **URL**: `https://github.com/dbaranec/sinum` (alebo URL vášho repository)
    - **Kategória**: **Integration**
    - Kliknite na **ADD**
 5. Po pridaní sa "Sinum" zobrazí v zozname integrácií
@@ -55,7 +55,7 @@ Ak chcete testovať integráciu lokálne bez toho, aby ste ju museli najprv nahr
    ./install_local.sh
    
    # Alebo manuálne cez SSH:
-   scp -r /Users/pinguin/Workspace/sinum/custom_components/sinum root@192.168.1.50:/config/custom_components/
+   scp -r /Users/dbaranec/Workspace/sinum/custom_components/sinum root@192.168.1.50:/config/custom_components/
    
    # Reštartujte HA:
    ssh root@192.168.1.50 "ha core restart"
@@ -70,13 +70,13 @@ Ak chcete testovať integráciu lokálne bez toho, aby ste ju museli najprv nahr
    
    **C) Lokálne kopírovanie (ak máte mountovaný config adresár):**
    ```bash
-   cp -r /Users/pinguin/Workspace/sinum/custom_components/sinum /config/custom_components/
+   cp -r /Users/dbaranec/Workspace/sinum/custom_components/sinum /config/custom_components/
    ```
    
    **D) Symlink pre development (zmeny sa prejavia automaticky po reštarte):**
    ```bash
    # Lokálne:
-   ln -s /Users/pinguin/Workspace/sinum/custom_components/sinum /config/custom_components/sinum
+   ln -s /Users/dbaranec/Workspace/sinum/custom_components/sinum /config/custom_components/sinum
    
    # Cez SSH (nepraktické, lepšie kopírovať):
    # ssh root@192.168.1.50 "ln -s /mnt/sdb1/sinum /config/custom_components/sinum"

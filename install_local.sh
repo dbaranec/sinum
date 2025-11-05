@@ -2,7 +2,7 @@
 # Script na lokálnu inštaláciu Sinum integrácie do Home Assistant
 
 # Konfigurácia - upravte podľa vašich potrieb
-PROJECT_DIR="/Users/pinguin/Workspace/sinum"
+PROJECT_DIR="/Users/dbaranec/Workspace/sinum"
 HA_IP="192.168.1.50"
 HA_USER="root"  # Zvyčajne 'root' pre Home Assistant OS
 HA_CONFIG_DIR="/config"  # Štandardná cesta pre Home Assistant OS
