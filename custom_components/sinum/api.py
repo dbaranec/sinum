@@ -21,6 +21,7 @@ class SinumAPI:
         self.password = password
         self._session: aiohttp.ClientSession | None = None
         self._auth_token: str | None = None
+        self._token_expires_at: float | None = None  # Timestamp when token expires
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -85,6 +86,47 @@ class SinumAPI:
                         )
                         
                         if self._auth_token:
+                            # Parse token expiration time from JWT payload
+                            try:
+                                import base64
+                                import json as json_lib
+                                import time
+                                
+                                # Decode JWT token to get expiration
+                                token_parts = self._auth_token.split(".")
+                                if len(token_parts) >= 2:
+                                    # Decode payload (add padding if needed)
+                                    payload_b64 = token_parts[1]
+                                    padding = 4 - len(payload_b64) % 4
+                                    if padding != 4:
+                                        payload_b64 += "=" * padding
+                                    
+                                    payload = json_lib.loads(
+                                        base64.urlsafe_b64decode(payload_b64).decode()
+                                    )
+                                    
+                                    # Get expiration time
+                                    expires_at = payload.get("expires_at")
+                                    expires_in = payload.get("expires_in", 3600)
+                                    
+                                    if expires_at:
+                                        # expires_at is Unix timestamp
+                                        # Set expiration 5 minutes before actual expiration for safety
+                                        self._token_expires_at = expires_at - 300
+                                    elif expires_in:
+                                        # expires_in is seconds until expiration
+                                        self._token_expires_at = time.time() + expires_in - 300
+                                    else:
+                                        # Default: assume 1 hour expiration, refresh after 55 minutes
+                                        self._token_expires_at = time.time() + 3300
+                                    
+                                    _LOGGER.debug("Token expires at: %s", self._token_expires_at)
+                            except Exception as err:
+                                _LOGGER.debug("Could not parse token expiration: %s", err)
+                                # Default: assume 1 hour expiration, refresh after 55 minutes
+                                import time
+                                self._token_expires_at = time.time() + 3300
+                            
                             _LOGGER.info("Successfully authenticated with endpoint: %s", auth_url)
                             return
                         else:
@@ -130,6 +172,20 @@ class SinumAPI:
         # Test získania dát
         await self.async_get_rooms()
 
+    async def _ensure_authenticated(self) -> None:
+        """Ensure we have a valid authentication token."""
+        import time
+        
+        # Check if token is expired or about to expire
+        if self._auth_token and self._token_expires_at:
+            if time.time() >= self._token_expires_at:
+                _LOGGER.info("Token expired, re-authenticating...")
+                self._auth_token = None
+                self._token_expires_at = None
+        
+        if not self._auth_token:
+            await self.async_authenticate()
+
     async def async_get_rooms(self) -> list[dict[str, Any]]:
         """Get list of rooms with temperatures.
         
@@ -138,8 +194,7 @@ class SinumAPI:
         - GET /api/v1/devices?class=sbus returns temperature sensors
         - Temperature sensors have room_id and temperature field
         """
-        if not self._auth_token:
-            await self.async_authenticate()
+        await self._ensure_authenticated()
         
         session = await self._get_session()
         
@@ -158,12 +213,30 @@ class SinumAPI:
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
-                if response.status != 200:
+                if response.status == 401:
+                    # Token expired, re-authenticate and retry once
+                    _LOGGER.warning("Token expired (401), re-authenticating...")
+                    self._auth_token = None
+                    self._token_expires_at = None
+                    await self.async_authenticate()
+                    headers["Authorization"] = self._auth_token
+                    # Retry once
+                    async with session.get(
+                        rooms_url,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as retry_response:
+                        if retry_response.status != 200:
+                            error_text = await retry_response.text()
+                            raise InvalidAuth(f"Authentication failed after retry: {retry_response.status} - {error_text[:200]}")
+                        rooms_data = await retry_response.json()
+                elif response.status != 200:
                     error_text = await response.text()
                     raise CannotConnect(f"Failed to get rooms: {response.status} - {error_text[:200]}")
+                else:
+                    rooms_data = await response.json()
                 
-                rooms_data = await response.json()
-                rooms_list = rooms_data.get("data", []) if isinstance(rooms_data, dict) else (rooms_data if isinstance(rooms_data, list) else [])
+            rooms_list = rooms_data.get("data", []) if isinstance(rooms_data, dict) else (rooms_data if isinstance(rooms_data, list) else [])
             
             # Get temperature sensors
             devices_url = f"{self.host}/api/v1/devices?class=sbus"
@@ -172,7 +245,32 @@ class SinumAPI:
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
-                if response.status != 200:
+                if response.status == 401:
+                    # Token expired, re-authenticate and retry once
+                    _LOGGER.warning("Token expired (401) when getting devices, re-authenticating...")
+                    self._auth_token = None
+                    self._token_expires_at = None
+                    await self.async_authenticate()
+                    headers["Authorization"] = self._auth_token
+                    # Retry once
+                    async with session.get(
+                        devices_url,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as retry_response:
+                        if retry_response.status != 200:
+                            error_text = await retry_response.text()
+                            _LOGGER.warning("Failed to get devices after retry: %s - %s", retry_response.status, error_text[:200])
+                            temp_sensors = []
+                        else:
+                            devices_data = await retry_response.json()
+                            devices_dict = devices_data.get("data", {}) if isinstance(devices_data, dict) else {}
+                            sbus_devices = devices_dict.get("sbus", []) if isinstance(devices_dict, dict) else []
+                            temp_sensors = [
+                                d for d in sbus_devices
+                                if d.get("type") == "temperature_sensor" and d.get("temperature") is not None
+                            ]
+                elif response.status != 200:
                     error_text = await response.text()
                     _LOGGER.warning("Failed to get devices: %s - %s", response.status, error_text[:200])
                     # Continue without temperatures if devices endpoint fails
