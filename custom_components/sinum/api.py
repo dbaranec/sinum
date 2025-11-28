@@ -73,12 +73,15 @@ class SinumAPI:
                             data = {"token": response_text.strip() if response_text.strip() else None}
                         
                         # Try different possible token field names
+                        # Sinum API returns token in data.session
+                        data_obj = data.get("data", {}) if isinstance(data.get("data"), dict) else {}
                         self._auth_token = (
-                            data.get("token")
+                            data_obj.get("session")  # Sinum API format: data.session
+                            or data_obj.get("access_token")
+                            or data.get("token")
                             or data.get("access_token")
                             or data.get("accessToken")
                             or data.get("auth_token")
-                            or data.get("access_token")
                         )
                         
                         if self._auth_token:
@@ -130,115 +133,96 @@ class SinumAPI:
     async def async_get_rooms(self) -> list[dict[str, Any]]:
         """Get list of rooms with temperatures.
         
-        According to Sinum API documentation:
-        GET /rooms (or similar endpoint) with Authorization header
-        Returns list of rooms with temperature data.
+        Sinum API structure:
+        - GET /api/v1/rooms returns rooms list
+        - GET /api/v1/devices?class=sbus returns temperature sensors
+        - Temperature sensors have room_id and temperature field
         """
         if not self._auth_token:
             await self.async_authenticate()
         
         session = await self._get_session()
         
-        # Sinum API endpoint for rooms - try common variations
-        # Based on API structure, likely /api/v1/rooms or similar
-        possible_rooms_endpoints = [
-            f"{self.host}/api/v1/rooms",  # Most likely based on login endpoint
-            f"{self.host}/api/v1/rooms/temperatures",
-            f"{self.host}/api/rooms",
-            f"{self.host}/rooms",
-        ]
-        
         headers = {
-            "Authorization": f"Bearer {self._auth_token}",
+            "Authorization": self._auth_token,  # Sinum API uses token directly, not "Bearer {token}"
             "Content-Type": "application/json",
         }
         
-        last_error = None
-        
-        for rooms_url in possible_rooms_endpoints:
+        try:
+            # Get rooms
+            rooms_url = f"{self.host}/api/v1/rooms"
             _LOGGER.debug("Trying rooms endpoint: %s", rooms_url)
             
-            try:
-                async with session.get(
-                    rooms_url,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        _LOGGER.info("Successfully retrieved rooms from endpoint: %s", rooms_url)
-                        # Handle different response formats
-                        if isinstance(data, list):
-                            # Direct list: [{"id": 1, "name": "Room", "temperature": 22.5}, ...]
-                            return data
-                        elif isinstance(data, dict):
-                            # Wrapped in object: {"rooms": [...], "data": [...], etc.}
-                            rooms_list = (
-                                data.get("rooms", [])
-                                or data.get("data", [])
-                                or data.get("items", [])
-                                or []
-                            )
-                            if rooms_list:
-                                return rooms_list
-                        else:
-                            _LOGGER.warning("Unexpected response format: %s", type(data))
-                    elif response.status == 401:
-                        # Token expired, try to re-authenticate once
-                        _LOGGER.warning("Token expired, re-authenticating...")
-                        self._auth_token = None
-                        await self.async_authenticate()
-                        # Retry once with new token
-                        headers["Authorization"] = f"Bearer {self._auth_token}"
-                        async with session.get(
-                            rooms_url,
-                            headers=headers,
-                            timeout=aiohttp.ClientTimeout(total=10),
-                        ) as retry_response:
-                            if retry_response.status == 200:
-                                data = await retry_response.json()
-                                if isinstance(data, list):
-                                    return data
-                                elif isinstance(data, dict):
-                                    rooms_list = (
-                                        data.get("rooms", [])
-                                        or data.get("data", [])
-                                        or data.get("items", [])
-                                        or []
-                                    )
-                                    if rooms_list:
-                                        return rooms_list
-                            raise InvalidAuth("Authentication failed after retry")
-                    elif response.status == 404:
-                        # Endpoint not found, try next one
-                        _LOGGER.debug("Endpoint %s not found (404), trying next...", rooms_url)
-                        continue
-                    else:
-                        error_text = await response.text()
-                        _LOGGER.warning("Failed to get rooms from %s: %s - %s", rooms_url, response.status, error_text[:200])
-                        last_error = CannotConnect(f"Failed to get rooms: {response.status}")
-                        continue
-                        
-            except (InvalidAuth, CannotConnect) as err:
-                raise
-            except aiohttp.ClientConnectorError as err:
-                _LOGGER.debug("Connection error to %s: %s", rooms_url, err)
-                last_error = CannotConnect(f"Cannot connect to Sinum API at {rooms_url}: {err}")
-                continue
-            except aiohttp.ClientError as err:
-                _LOGGER.debug("HTTP error to %s: %s", rooms_url, err)
-                last_error = CannotConnect(f"Connection error to {rooms_url}: {err}")
-                continue
-            except Exception as err:
-                _LOGGER.debug("Unexpected error with %s: %s", rooms_url, err)
-                last_error = CannotConnect(f"Error getting rooms: {err}")
-                continue
-        
-        # If we get here, all endpoints failed
-        if last_error:
-            raise last_error
-        else:
-            raise CannotConnect("All rooms endpoints failed")
+            async with session.get(
+                rooms_url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise CannotConnect(f"Failed to get rooms: {response.status} - {error_text[:200]}")
+                
+                rooms_data = await response.json()
+                rooms_list = rooms_data.get("data", []) if isinstance(rooms_data, dict) else (rooms_data if isinstance(rooms_data, list) else [])
+            
+            # Get temperature sensors
+            devices_url = f"{self.host}/api/v1/devices?class=sbus"
+            async with session.get(
+                devices_url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    _LOGGER.warning("Failed to get devices: %s - %s", response.status, error_text[:200])
+                    # Continue without temperatures if devices endpoint fails
+                    temp_sensors = []
+                else:
+                    devices_data = await response.json()
+                    devices_dict = devices_data.get("data", {}) if isinstance(devices_data, dict) else {}
+                    sbus_devices = devices_dict.get("sbus", []) if isinstance(devices_dict, dict) else []
+                    # Filter temperature sensors
+                    temp_sensors = [
+                        d for d in sbus_devices
+                        if d.get("type") == "temperature_sensor" and d.get("temperature") is not None
+                    ]
+            
+            # Create temperature map by room_id
+            temp_by_room: dict[int, float] = {}
+            for sensor in temp_sensors:
+                room_id = sensor.get("room_id")
+                temp_tenths = sensor.get("temperature")
+                if room_id and temp_tenths is not None:
+                    # Convert from tenths of degrees to degrees (e.g., 223 -> 22.3)
+                    temp_by_room[room_id] = temp_tenths / 10.0
+            
+            # Combine rooms with temperatures
+            result = []
+            for room in rooms_list:
+                room_id = room.get("id")
+                room_name = room.get("name", f"Room {room_id}")
+                temperature = temp_by_room.get(room_id) if room_id else None
+                
+                result.append({
+                    "id": room_id,
+                    "name": room_name,
+                    "temperature": temperature,
+                })
+            
+            _LOGGER.info("Retrieved %d rooms with temperatures", len(result))
+            return result
+            
+        except (InvalidAuth, CannotConnect):
+            raise
+        except aiohttp.ClientConnectorError as err:
+            _LOGGER.error("Connection error: %s", err)
+            raise CannotConnect(f"Cannot connect to Sinum API: {err}") from err
+        except aiohttp.ClientError as err:
+            _LOGGER.error("HTTP error: %s", err)
+            raise CannotConnect(f"Connection error: {err}") from err
+        except Exception as err:
+            _LOGGER.error("Unexpected error: %s", err)
+            raise CannotConnect(f"Error getting rooms: {err}") from err
 
     async def async_close(self) -> None:
         """Close the session."""
