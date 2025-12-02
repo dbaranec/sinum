@@ -108,27 +108,69 @@ Alebo môže byť zabalené v objekte:
 
 ## Senzory
 
-Po úspešnej konfigurácii sa vytvoria teplotné senzory pre každú miestnosť:
-- `sensor.sinum_[nazov_miestnosti]` - teplota v miestnosti
+Po úspešnej konfigurácii sa vytvoria nasledujúce senzory pre každú miestnosť:
+
+### Teplotné senzory:
+- `sensor.sinum_[nazov_miestnosti]` - teplota v miestnosti (°C)
+
+### Vlhkostné senzory:
+- `sensor.sinum_[nazov_miestnosti]_humidity` - vlhkosť v miestnosti (%)
+
+### Binary senzory (stav okruhu):
+- `binary_sensor.sinum_[nazov_miestnosti]_heating` - stav vykurovacieho okruhu (ON/OFF)
+- `binary_sensor.sinum_[nazov_miestnosti]_cooling` - stav chladiacieho okruhu (ON/OFF)
+
+**Poznámka**: Nie všetky senzory sa vytvoria pre každú miestnosť - závisí to od toho, aké zariadenia sú v danej miestnosti nainštalované.
 
 ## Riešenie problémov
+
+### Ako zobraziť logy v Home Assistant
+
+**Metóda 1: Cez Developer Tools (najjednoduchšie)**
+1. Otvorte Home Assistant UI
+2. V bočnom menu kliknite na **Developer Tools** (ikona kladiva)
+3. Prejdite na záložku **Logs**
+4. V poli "Filter" zadajte: `sinum` alebo `SinumAPI`
+5. Zobrazia sa len relevantné logy
+
+**Metóda 2: Cez Settings**
+1. Otvorte **Settings** (Nastavenia)
+2. Prejdite do **System**
+3. Kliknite na **Logs**
+4. V poli "Filter" zadajte: `sinum`
+
+**Metóda 3: Zapnite debug logy pre detailnejšie informácie**
+
+Pridajte do `configuration.yaml`:
+```yaml
+logger:
+  default: info
+  logs:
+    custom_components.sinum: debug
+```
+
+Po pridaní:
+1. Reštartujte Home Assistant
+2. Použite Metódu 1 alebo 2 na zobrazenie logov
+3. Uvidíte detailné informácie o:
+   - Autentifikácii
+   - Obnovovaní tokenu
+   - API požiadavkách
+   - Chybách
+
+**Čo hľadať v logoch:**
+- `Successfully authenticated` - úspešné prihlásenie
+- `Token expired, re-authenticating` - automatické obnovovanie tokenu
+- `Retrieved X rooms with temperatures` - úspešné získanie dát
+- Chybové správy začínajúce `ERROR` alebo `WARNING`
 
 ### Chyba "invalid_auth"
 
 Ak dostávate chybu "invalid_auth" aj keď sú údaje správne:
 
-1. **Zapnite debug logy** v `configuration.yaml`:
-   ```yaml
-   logger:
-     default: info
-     logs:
-       custom_components.sinum: debug
-   ```
-
-2. **Skontrolujte logy** v Home Assistant:
-   - Prejdite do **Developer Tools** → **Logs**
-   - Alebo Settings → System → Logs
-   - Hľadajte správy obsahujúce "sinum" alebo "SinumAPI"
+1. **Zapnite debug logy** (pozri vyššie)
+2. **Skontrolujte logy** v Home Assistant (pozri vyššie)
+3. Hľadajte správy obsahujúce "sinum" alebo "SinumAPI"
 
 3. **Overte API endpoint**:
    - Skontrolujte, či API je dostupné na vašej URL (napr. `https://sinum.local/api/v1/login`)

@@ -238,7 +238,7 @@ class SinumAPI:
                 
             rooms_list = rooms_data.get("data", []) if isinstance(rooms_data, dict) else (rooms_data if isinstance(rooms_data, list) else [])
             
-            # Get temperature sensors
+            # Get sbus devices (temperature and humidity sensors)
             devices_url = f"{self.host}/api/v1/devices?class=sbus"
             async with session.get(
                 devices_url,
@@ -261,32 +261,73 @@ class SinumAPI:
                         if retry_response.status != 200:
                             error_text = await retry_response.text()
                             _LOGGER.warning("Failed to get devices after retry: %s - %s", retry_response.status, error_text[:200])
-                            temp_sensors = []
+                            sbus_devices = []
                         else:
                             devices_data = await retry_response.json()
                             devices_dict = devices_data.get("data", {}) if isinstance(devices_data, dict) else {}
                             sbus_devices = devices_dict.get("sbus", []) if isinstance(devices_dict, dict) else []
-                            temp_sensors = [
-                                d for d in sbus_devices
-                                if d.get("type") == "temperature_sensor" and d.get("temperature") is not None
-                            ]
                 elif response.status != 200:
                     error_text = await response.text()
                     _LOGGER.warning("Failed to get devices: %s - %s", response.status, error_text[:200])
-                    # Continue without temperatures if devices endpoint fails
-                    temp_sensors = []
+                    sbus_devices = []
                 else:
                     devices_data = await response.json()
                     devices_dict = devices_data.get("data", {}) if isinstance(devices_data, dict) else {}
                     sbus_devices = devices_dict.get("sbus", []) if isinstance(devices_dict, dict) else []
-                    # Filter temperature sensors
-                    temp_sensors = [
-                        d for d in sbus_devices
-                        if d.get("type") == "temperature_sensor" and d.get("temperature") is not None
-                    ]
             
-            # Create temperature map by room_id
+            # Get virtual devices (thermostats with heating/cooling state)
+            virtual_devices_url = f"{self.host}/api/v1/devices?class=virtual"
+            async with session.get(
+                virtual_devices_url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 401:
+                    # Token expired, re-authenticate and retry once
+                    _LOGGER.warning("Token expired (401) when getting virtual devices, re-authenticating...")
+                    self._auth_token = None
+                    self._token_expires_at = None
+                    await self.async_authenticate()
+                    headers["Authorization"] = self._auth_token
+                    # Retry once
+                    async with session.get(
+                        virtual_devices_url,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as retry_response:
+                        if retry_response.status != 200:
+                            error_text = await retry_response.text()
+                            _LOGGER.warning("Failed to get virtual devices after retry: %s - %s", retry_response.status, error_text[:200])
+                            virtual_devices = []
+                        else:
+                            devices_data = await retry_response.json()
+                            devices_dict = devices_data.get("data", {}) if isinstance(devices_data, dict) else {}
+                            virtual_devices = devices_dict.get("virtual", []) if isinstance(devices_dict, dict) else []
+                elif response.status != 200:
+                    error_text = await response.text()
+                    _LOGGER.warning("Failed to get virtual devices: %s - %s", response.status, error_text[:200])
+                    virtual_devices = []
+                else:
+                    devices_data = await response.json()
+                    devices_dict = devices_data.get("data", {}) if isinstance(devices_data, dict) else {}
+                    virtual_devices = devices_dict.get("virtual", []) if isinstance(devices_dict, dict) else []
+            
+            # Filter temperature and humidity sensors
+            temp_sensors = [
+                d for d in sbus_devices
+                if d.get("type") == "temperature_sensor" and d.get("temperature") is not None
+            ]
+            humidity_sensors = [
+                d for d in sbus_devices
+                if d.get("type") == "humidity_sensor" and d.get("humidity") is not None
+            ]
+            
+            # Create maps by room_id
             temp_by_room: dict[int, float] = {}
+            humidity_by_room: dict[int, float] = {}
+            heating_state_by_room: dict[int, bool] = {}
+            cooling_state_by_room: dict[int, bool] = {}
+            
             for sensor in temp_sensors:
                 room_id = sensor.get("room_id")
                 temp_tenths = sensor.get("temperature")
@@ -294,17 +335,53 @@ class SinumAPI:
                     # Convert from tenths of degrees to degrees (e.g., 223 -> 22.3)
                     temp_by_room[room_id] = temp_tenths / 10.0
             
-            # Combine rooms with temperatures
+            for sensor in humidity_sensors:
+                room_id = sensor.get("room_id")
+                humidity_tenths = sensor.get("humidity")
+                if room_id and humidity_tenths is not None:
+                    # Convert from tenths of percent to percent (e.g., 381 -> 38.1)
+                    humidity_by_room[room_id] = humidity_tenths / 10.0
+            
+            for device in virtual_devices:
+                room_id = device.get("room_id")
+                if room_id:
+                    # State indicates if heating/cooling circuit is active
+                    # Mode indicates which type: "heating" or "cooling"
+                    state = device.get("state", False)
+                    mode = device.get("mode", "")
+                    
+                    # Initialize both to False
+                    heating_state_by_room[room_id] = False
+                    cooling_state_by_room[room_id] = False
+                    
+                    # If state is True, determine which mode is active
+                    if state is True:
+                        if mode == "heating":
+                            heating_state_by_room[room_id] = True
+                        elif mode == "cooling":
+                            cooling_state_by_room[room_id] = True
+                        # If state is True but mode is unclear, check is_heating/is_cooling
+                        else:
+                            is_heating = device.get("is_heating")
+                            is_cooling = device.get("is_cooling")
+                            if is_heating is True:
+                                heating_state_by_room[room_id] = True
+                            elif is_cooling is True:
+                                cooling_state_by_room[room_id] = True
+            
+            # Combine rooms with all data
             result = []
             for room in rooms_list:
                 room_id = room.get("id")
                 room_name = room.get("name", f"Room {room_id}")
-                temperature = temp_by_room.get(room_id) if room_id else None
                 
                 result.append({
                     "id": room_id,
                     "name": room_name,
-                    "temperature": temperature,
+                    "temperature": temp_by_room.get(room_id) if room_id else None,
+                    "humidity": humidity_by_room.get(room_id) if room_id else None,
+                    "heating_on": heating_state_by_room.get(room_id, False) if room_id else False,
+                    "cooling_on": cooling_state_by_room.get(room_id, False) if room_id else False,
                 })
             
             _LOGGER.info("Retrieved %d rooms with temperatures", len(result))

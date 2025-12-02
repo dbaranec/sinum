@@ -1,13 +1,11 @@
-"""Sensor platform for Sinum integration."""
+"""Binary sensor platform for Sinum integration."""
 from __future__ import annotations
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature, PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -21,7 +19,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Sinum sensor platform."""
+    """Set up Sinum binary sensor platform."""
     api = hass.data[DOMAIN][entry.entry_id]
     coordinator = SinumDataUpdateCoordinator(hass, api)
     
@@ -30,18 +28,16 @@ async def async_setup_entry(
     
     entities = []
     for room_id, room_data in coordinator.data.items():
-        # Add temperature sensor if temperature is available
-        if room_data.get("temperature") is not None:
-            entities.append(SinumTemperatureSensor(coordinator, room_id, room_data))
-        # Add humidity sensor if humidity is available
-        if room_data.get("humidity") is not None:
-            entities.append(SinumHumiditySensor(coordinator, room_id, room_data))
+        # Add heating binary sensor for all rooms (will show False if not available)
+        entities.append(SinumHeatingBinarySensor(coordinator, room_id, room_data))
+        # Add cooling binary sensor for all rooms (will show False if not available)
+        entities.append(SinumCoolingBinarySensor(coordinator, room_id, room_data))
     
     async_add_entities(entities)
 
 
-class SinumTemperatureSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a Sinum temperature sensor."""
+class SinumHeatingBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of a Sinum heating circuit binary sensor."""
 
     def __init__(
         self,
@@ -53,24 +49,18 @@ class SinumTemperatureSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_id = room_id
         self._room_name = room_data.get("name", f"Room {room_id}")
-        self._attr_name = f"Sinum {self._room_name}"
-        self._attr_unique_id = f"{DOMAIN}_{room_id}_temperature"
-        self._attr_device_class = SensorDeviceClass.TEMPERATURE
-        self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_name = f"Sinum {self._room_name} Heating"
+        self._attr_unique_id = f"{DOMAIN}_{room_id}_heating"
+        self._attr_device_class = BinarySensorDeviceClass.HEAT
 
     @property
-    def native_value(self) -> float | None:
+    def is_on(self) -> bool:
         """Return the state of the sensor."""
         if self.coordinator.data and self._room_id in self.coordinator.data:
             room_data = self.coordinator.data[self._room_id]
-            temperature = room_data.get("temperature")
-            if temperature is not None:
-                try:
-                    return float(temperature)
-                except (ValueError, TypeError):
-                    return None
-        return None
+            heating_on = room_data.get("heating_on", False)
+            return bool(heating_on)
+        return False
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -81,8 +71,8 @@ class SinumTemperatureSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class SinumHumiditySensor(CoordinatorEntity, SensorEntity):
-    """Representation of a Sinum humidity sensor."""
+class SinumCoolingBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Representation of a Sinum cooling circuit binary sensor."""
 
     def __init__(
         self,
@@ -94,24 +84,18 @@ class SinumHumiditySensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_id = room_id
         self._room_name = room_data.get("name", f"Room {room_id}")
-        self._attr_name = f"Sinum {self._room_name} Humidity"
-        self._attr_unique_id = f"{DOMAIN}_{room_id}_humidity"
-        self._attr_device_class = SensorDeviceClass.HUMIDITY
-        self._attr_native_unit_of_measurement = PERCENTAGE
-        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_name = f"Sinum {self._room_name} Cooling"
+        self._attr_unique_id = f"{DOMAIN}_{room_id}_cooling"
+        self._attr_device_class = BinarySensorDeviceClass.COLD
 
     @property
-    def native_value(self) -> float | None:
+    def is_on(self) -> bool:
         """Return the state of the sensor."""
         if self.coordinator.data and self._room_id in self.coordinator.data:
             room_data = self.coordinator.data[self._room_id]
-            humidity = room_data.get("humidity")
-            if humidity is not None:
-                try:
-                    return float(humidity)
-                except (ValueError, TypeError):
-                    return None
-        return None
+            cooling_on = room_data.get("cooling_on", False)
+            return bool(cooling_on)
+        return False
 
     @property
     def extra_state_attributes(self) -> dict:
